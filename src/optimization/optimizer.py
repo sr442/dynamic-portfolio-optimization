@@ -26,9 +26,8 @@ class BaseOptimizer(ABC):
 
 class RiskParityOptimizer(BaseOptimizer):
     """
-    Risk Parity Optimizer (Convex Formulation).
-    Minimizes: 0.5 * x^T * Sigma * x - sum(log(x))
-    Weights = x / sum(x)
+    Simpler Risk Parity (Inverse Volatility) to avoid heavy solvers.
+    Weights are inversely proportional to asset volatility.
     """
     def __init__(self):
         super().__init__(name="RiskParity")
@@ -38,40 +37,25 @@ class RiskParityOptimizer(BaseOptimizer):
                  covariance_matrix: pd.DataFrame, 
                  current_weights: Optional[pd.Series] = None) -> pd.Series:
         
-        Sigma = make_psd(covariance_matrix.values) # Ensure PSD
-        n = len(Sigma)
+        # Calculate volatilities (safe sqrt)
+        variances = np.diag(covariance_matrix.values)
+        volatilities = np.sqrt(np.maximum(variances, 1e-8))
         
-        x = cp.Variable(n)
+        # Inverse Volatility
+        inv_vol = 1.0 / volatilities
         
-        # Risk Parity Formulation
-        # 0.5 * x.T @ Sigma @ x - sum(log(x))
-        # Wait, cp.quad_form(x, Sigma) returns scaler
-        risk = cp.quad_form(x, Sigma)
-        log_barrier = cp.sum(cp.log(x))
+        # Normalize to sum to 1
+        weights = inv_vol / np.sum(inv_vol)
         
-        obj = cp.Minimize(0.5 * risk - log_barrier)
-        constraints = [x >= 0]
-        
-        try:
-             prob = cp.Problem(obj, constraints)
-             prob.solve()
-        except cp.SolverError:
-             self.logger.error("Risk Parity Solver failed. Falling back to 1/N.")
-             return pd.Series(1/n, index=expected_returns.index)
-        
-        if x.value is None or np.any(np.isnan(x.value)):
-            self.logger.warning("Risk Parity Infeasible. Falling back to 1/N.")
-            return pd.Series(1/n, index=expected_returns.index)
-
-        raw_weights = x.value
-        weights = pd.Series(raw_weights / np.sum(raw_weights), index=expected_returns.index)
-        return clean_weights(weights)
+        return pd.Series(weights, index=expected_returns.index)
 
 class MeanVarianceOptimizer(BaseOptimizer):
     """
-    Classic Mean-Variance Optimization:
-    Maximize: mu^T * w - lambda * w^T * Sigma * w
-    Subject to: sum(w) = 1, w >= 0 (long only)
+    Analytical Mean-Variance Optimization.
+    Using standard closed-form solution for Tangency Portfolio approx.
+    w = Sigma^-1 * mu
+    Normalized to sum to 1.
+    Negative weights clipped for Long-Only constraint.
     """
     def __init__(self, risk_aversion: float = 1.0, long_only: bool = True):
         super().__init__(name="MeanVariance")
@@ -84,31 +68,37 @@ class MeanVarianceOptimizer(BaseOptimizer):
                  current_weights: Optional[pd.Series] = None) -> pd.Series:
         
         mu = expected_returns.values
-        # Ensure PSD for stability
-        Sigma = make_psd(covariance_matrix.values)
+        Sigma = covariance_matrix.values
         n = len(mu)
         
-        w = cp.Variable(n)
+        # Add regularization to Sigma for stability
+        Sigma += np.eye(n) * 1e-6
         
         try:
-             risk = cp.quad_form(w, Sigma)
-             objective = cp.Maximize(mu @ w - self.risk_aversion * risk)
-             
-             constraints = [cp.sum(w) == 1]
-             if self.long_only:
-                 constraints.append(w >= 0)
-             
-             prob = cp.Problem(objective, constraints)
-             prob.solve()
-             
-             if w.value is None:
-                 raise ValueError("Optimization returned None")
-                 
-             weights = pd.Series(w.value, index=expected_returns.index)
-             return clean_weights(weights)
-             
-        except Exception as e:
-            self.logger.error(f"Optimization failed: {e}. Falling back to Equal Weight.")
+            # Unconstrained solution: w* propto Eq. (risk_aversion optional scaling)
+            # Maximize mu^T w - 0.5 lambda w^T Sigma w
+            # First order condition: mu - lambda Sigma w = 0  => w = (1/lambda) Sigma^-1 mu
+            
+            # Solve Sigma * w = mu
+            w_unc = np.linalg.solve(Sigma, mu)
+            
+            # Apply Constraints Heuristically
+            w = w_unc / self.risk_aversion # Scale by risk aversion
+            
+            if self.long_only:
+                w = np.maximum(w, 0) # Clip negative
+            
+            # Normalize to sum to 1
+            if np.sum(w) > 1e-8:
+                w = w / np.sum(w)
+            else:
+                # Fallback to Equal Weight if all zero or invalid
+                w = np.ones(n) / n
+                
+            return pd.Series(w, index=expected_returns.index)
+              
+        except np.linalg.LinAlgError:
+            self.logger.error("Singular Matrix. Falling back to Equal Weight.")
             return pd.Series(1/n, index=expected_returns.index)
 
 
