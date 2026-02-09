@@ -40,3 +40,4 @@ config/secrets.yaml
 node_modules/
 frontend/node_modules/
 .vercel
+venv/
