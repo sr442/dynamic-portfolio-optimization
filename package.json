@@ -1,0 +1,8 @@
+{
+    "name": "dynamic-portfolio-optimization",
+    "version": "1.0.0",
+    "description": "AI-Driven Portfolio Optimization",
+    "scripts": {
+        "vercel-build": "cd frontend && npm install && npm run build"
+    }
+}

@@ -37,3 +37,6 @@ config/secrets.yaml
 
 # MacOS
 .DS_Store
+node_modules/
+frontend/node_modules/
+.vercel

@@ -8,7 +8,7 @@ import {
   BarChart2, PieChart, Activity, TrendingUp, DollarSign, Download, Play, RefreshCw, AlertCircle
 } from 'lucide-react';
 
-const API_URL = 'http://localhost:8000/api';
+const API_URL = import.meta.env.PROD ? '/api' : 'http://localhost:8000/api';
 
 function App() {
   const [activeTab, setActiveTab] = useState('live'); // 'live' or 'backtest'
