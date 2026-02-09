@@ -1,7 +1,12 @@
 import pandas as pd
 import numpy as np
 import logging
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable, **kwargs):
+        return iterable
+
 from typing import Optional, Dict, List
 
 from src.data.features import FeatureEngineer, MarketState
