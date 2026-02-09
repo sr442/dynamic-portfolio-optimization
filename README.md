@@ -70,6 +70,10 @@ For a production-ready interface with separated backend and frontend:
     
 The full-stack app features a dark-mode professional dashboard, real-time optimization, and interactive equity curves.
 
+### Deployment
+- **GitHub**: See `DEPLOYMENT.md`.
+- **Vercel**: See `VERCEL_DEPLOYMENT.md` for serverless deployment instructions.
+
 ### Configuration
 You can modify `main.py` to change:
 - `TICKERS`: List of assets.
