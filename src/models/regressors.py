@@ -8,10 +8,7 @@ from typing import Optional, Dict, Any
 from .base import BasePredictor
 import pandas as pd
 import numpy as np
-try:
-    from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
-except ImportError:
-    pass
+# from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 import logging
 from typing import Optional, Dict, Any
 
