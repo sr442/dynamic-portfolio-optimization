@@ -166,14 +166,26 @@ with tab_live:
                 cov_matrix = hist_returns.cov() # Simple cov
                 
                 # Optimize
-                if optimizer_type == "Mean-Variance":
-                    opt = MeanVarianceOptimizer(risk_aversion=risk_aversion)
-                elif optimizer_type == "Risk Parity":
-                    opt = RiskParityOptimizer()
-                else:
-                    opt = EqualWeightOptimizer()
-                
-                target_weights = opt.optimize(pred_returns, cov_matrix)
+                try:
+                    if optimizer_type == "Mean-Variance":
+                        opt = MeanVarianceOptimizer(risk_aversion=risk_aversion)
+                    elif optimizer_type == "Risk Parity":
+                        opt = RiskParityOptimizer()
+                    else:
+                        opt = EqualWeightOptimizer()
+                    
+                    # Fill NaNs in covariance if any
+                    if cov_matrix.isna().any().any():
+                        cov_matrix = cov_matrix.fillna(0)
+                        # Ensure diagonal is non-zero
+                        np.fill_diagonal(cov_matrix.values, np.nanmax(np.diag(cov_matrix.values)) + 1e-6)
+
+                    target_weights = opt.optimize(pred_returns, cov_matrix)
+                except Exception as e:
+                    st.error(f"Optimization failed: {e}. Defaulting to Equal Weight.")
+                    # Fallback to EW
+                    n = len(pred_returns)
+                    target_weights = pd.Series(1/n, index=pred_returns.index)
                 
                 # --- DISPLAY RESULTS ---
                 

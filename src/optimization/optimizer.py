@@ -36,17 +36,31 @@ class RiskParityOptimizer(BaseOptimizer):
                  covariance_matrix: pd.DataFrame, 
                  current_weights: Optional[pd.Series] = None) -> pd.Series:
         
+        if covariance_matrix.empty:
+             return self._fallback(expected_returns)
+
         # Calculate volatilities (safe sqrt)
         variances = np.diag(covariance_matrix.values)
-        volatilities = np.sqrt(np.maximum(variances, 1e-8))
+        if np.any(variances <= 0) or np.any(np.isnan(variances)):
+             self.logger.warning("Invalid variances detected. Fallback to EW.")
+             return self._fallback(expected_returns)
+             
+        volatilities = np.sqrt(variances)
         
         # Inverse Volatility
+        # Handle zero volatility by replacing with mean or small epsilon, or just fallback
+        if np.any(volatilities < 1e-8):
+             volatilities = np.maximum(volatilities, 1e-8)
+             
         inv_vol = 1.0 / volatilities
         
         # Normalize to sum to 1
         weights = inv_vol / np.sum(inv_vol)
         
         return pd.Series(weights, index=expected_returns.index)
+
+    def _fallback(self, expected_returns):
+         return pd.Series(1.0 / len(expected_returns), index=expected_returns.index)
 
 class MeanVarianceOptimizer(BaseOptimizer):
     """
@@ -74,6 +88,15 @@ class MeanVarianceOptimizer(BaseOptimizer):
         Sigma += np.eye(n) * 1e-6
         
         try:
+            # Check for NaNs/Infs in inputs
+            if np.any(np.isnan(Sigma)) or np.any(np.isinf(Sigma)) or np.any(np.isnan(mu)):
+                 raise ValueError("NaNs in inputs")
+
+            # Check condition number to avoid singular matrix errors
+            cond_num = np.linalg.cond(Sigma)
+            if cond_num > 1e12: # Ill-conditioned
+                 raise np.linalg.LinAlgError("Matrix ill-conditioned")
+
             # Unconstrained solution: w* propto Eq. (risk_aversion optional scaling)
             # Maximize mu^T w - 0.5 lambda w^T Sigma w
             # First order condition: mu - lambda Sigma w = 0  => w = (1/lambda) Sigma^-1 mu
@@ -88,17 +111,21 @@ class MeanVarianceOptimizer(BaseOptimizer):
                 w = np.maximum(w, 0) # Clip negative
             
             # Normalize to sum to 1
-            if np.sum(w) > 1e-8:
-                w = w / np.sum(w)
+            w_sum = np.sum(w)
+            if w_sum > 1e-8:
+                w = w / w_sum
             else:
                 # Fallback to Equal Weight if all zero or invalid
-                w = np.ones(n) / n
+                return self._fallback(expected_returns)
                 
             return pd.Series(w, index=expected_returns.index)
               
-        except np.linalg.LinAlgError:
-            self.logger.error("Singular Matrix. Falling back to Equal Weight.")
-            return pd.Series(1/n, index=expected_returns.index)
+        except (np.linalg.LinAlgError, ValueError) as e:
+            self.logger.warning(f"Optimization failed ({e}). Falling back to Equal Weight.")
+            return self._fallback(expected_returns)
+
+    def _fallback(self, expected_returns):
+         return pd.Series(1.0 / len(expected_returns), index=expected_returns.index)
 
 
 class EqualWeightOptimizer(BaseOptimizer):

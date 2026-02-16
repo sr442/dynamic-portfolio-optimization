@@ -148,14 +148,23 @@ def optimize_portfolio(req: OptRequest):
         cov_matrix = hist_returns.cov()
         
         # Optimizer
-        if req.optimizer == "Mean-Variance":
-            opt = MeanVarianceOptimizer(risk_aversion=req.risk_aversion)
-        elif req.optimizer == "Risk Parity":
-            opt = RiskParityOptimizer()
-        else:
-            opt = EqualWeightOptimizer()
-            
-        weights = opt.optimize(pred_returns, cov_matrix)
+        try:
+            if req.optimizer == "Mean-Variance":
+                opt = MeanVarianceOptimizer(risk_aversion=req.risk_aversion)
+            elif req.optimizer == "Risk Parity":
+                opt = RiskParityOptimizer()
+            else:
+                opt = EqualWeightOptimizer()
+                
+             # Fill NaNs
+            if cov_matrix.isna().any().any():
+                 cov_matrix = cov_matrix.fillna(0)
+                 np.fill_diagonal(cov_matrix.values, np.nanmax(np.diag(cov_matrix.values)) + 1e-6)
+
+            weights = opt.optimize(pred_returns, cov_matrix)
+        except Exception as e:
+            logger.error(f"Optimization warning: {e}. Fallback to EW.")
+            weights = pd.Series(1.0/len(req.tickers), index=req.tickers)
         
         # Format Response
         allocation = []
