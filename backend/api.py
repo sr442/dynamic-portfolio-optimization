@@ -9,8 +9,9 @@ import logging
 from .src.data.ingestion import DataIngestion
 from .src.data.features import FeatureEngineer, MarketState
 from .src.models.baseline import MomentumPredictor
+from .src.models.regressors import XGBoostPredictor
 from .src.models.risk import VolatilityPredictor
-from .src.optimization.optimizer import MeanVarianceOptimizer, RiskParityOptimizer
+from .src.optimization.optimizer import MeanVarianceOptimizer, RiskParityOptimizer, EqualWeightOptimizer
 from .src.backtest.engine import BacktestEngine
 
 app = FastAPI(title="Dynamic Portfolio Optimization API", version="1.0.0")
@@ -32,6 +33,7 @@ class OptRequest(BaseModel):
     tickers: List[str]
     capital: float
     optimizer: str = "Mean-Variance"
+    predictor: str = "Momentum"
     risk_aversion: float = 2.5
     lookback_days: int = 365
 
@@ -41,6 +43,7 @@ class BacktestRequest(BaseModel):
     start_date: str
     end_date: str
     optimizer: str = "Mean-Variance"
+    predictor: str = "Momentum"
     risk_aversion: float = 2.5
 
 class PortfolioWeight(BaseModel):
@@ -100,7 +103,15 @@ def optimize_portfolio(req: OptRequest):
         X_now = state_now.unstack(level='Feature')
         
         # Models
-        predictor = MomentumPredictor(momentum_window=20)
+        # Models
+        if req.predictor == "Momentum":
+            predictor = MomentumPredictor(momentum_window=20)
+        elif req.predictor == "XGBoost":
+            predictor = XGBoostPredictor(model_type='xgboost')
+        elif req.predictor == "Random Forest":
+            predictor = XGBoostPredictor(model_type='random_forest')
+        else:
+            predictor = MomentumPredictor(momentum_window=20) # Default
         
         pred_returns = predictor.predict(X_now)
         
@@ -112,8 +123,10 @@ def optimize_portfolio(req: OptRequest):
         # Optimizer
         if req.optimizer == "Mean-Variance":
             opt = MeanVarianceOptimizer(risk_aversion=req.risk_aversion)
-        else:
+        elif req.optimizer == "Risk Parity":
             opt = RiskParityOptimizer()
+        else:
+            opt = EqualWeightOptimizer()
             
         weights = opt.optimize(pred_returns, cov_matrix)
         
@@ -151,13 +164,26 @@ def run_backtest(req: BacktestRequest):
             raise HTTPException(status_code=404, detail="No market data found.")
             
         fe = FeatureEngineer()
-        predictor = MomentumPredictor(momentum_window=20)
+        fe = FeatureEngineer()
+        
+        if req.predictor == "Momentum":
+            predictor = MomentumPredictor(momentum_window=20)
+        elif req.predictor == "XGBoost":
+            predictor = XGBoostPredictor(model_type='xgboost')
+        elif req.predictor == "Random Forest":
+            predictor = XGBoostPredictor(model_type='random_forest')
+        else:
+            predictor = MomentumPredictor(momentum_window=20)
+            
+        risk_model = VolatilityPredictor(window=60)
         risk_model = VolatilityPredictor(window=60)
         
         if req.optimizer == "Mean-Variance":
             opt = MeanVarianceOptimizer(risk_aversion=req.risk_aversion)
-        else:
+        elif req.optimizer == "Risk Parity":
             opt = RiskParityOptimizer()
+        else:
+            opt = EqualWeightOptimizer()
             
         engine = BacktestEngine(
             initial_capital=req.capital,

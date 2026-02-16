@@ -7,8 +7,9 @@ import logging
 from src.data.ingestion import DataIngestion
 from src.data.features import FeatureEngineer
 from src.models.baseline import MomentumPredictor
+from src.models.regressors import XGBoostPredictor
 from src.models.risk import VolatilityPredictor
-from src.optimization.optimizer import MeanVarianceOptimizer, RiskParityOptimizer
+from src.optimization.optimizer import MeanVarianceOptimizer, RiskParityOptimizer, EqualWeightOptimizer
 from src.backtest.engine import BacktestEngine
 
 # Configure Logging (to console)
@@ -58,7 +59,9 @@ with st.sidebar.form("global_config"):
     tickers_input = st.text_area("Investment Universe (Comma Separated)", default_tickers, help="Assets to consider for allocation.")
     
     # Optimizer Settings
-    optimizer_type = st.selectbox("Optimizer Model", ["Mean-Variance", "Risk Parity"])
+    # Optimizer Settings
+    optimizer_type = st.selectbox("Optimizer Model", ["Mean-Variance", "Risk Parity", "Equal Weight"])
+    predictor_type = st.selectbox("Prediction Model", ["Momentum (Baseline)", "XGBoost", "Random Forest"])
     risk_aversion = st.slider("Risk Aversion (Lambda)", 0.5, 10.0, 2.5, help="Higher = More conservative")
     
     st.markdown("---")
@@ -106,7 +109,15 @@ with tab_live:
                 X_now = state_now.unstack(level='Feature') # (N_assets, N_features)
                 
                 # Models
-                predictor = MomentumPredictor(momentum_window=20)
+                # Models
+                if predictor_type == "Momentum (Baseline)":
+                    predictor = MomentumPredictor(momentum_window=20)
+                elif predictor_type == "XGBoost":
+                     predictor = XGBoostPredictor(hyperparams={'n_estimators': 100, 'max_depth': 3}, model_type='xgboost')
+                     if predictor.model_type != 'xgboost':
+                         st.warning("XGBoost not available, falling back to Random Forest.")
+                elif predictor_type == "Random Forest":
+                     predictor = XGBoostPredictor(hyperparams={'n_estimators': 100, 'max_depth': 5}, model_type='random_forest')
                 risk_model = VolatilityPredictor(window=60)
                 
                 # Predict Returns (Next Period)
@@ -123,8 +134,10 @@ with tab_live:
                 # Optimize
                 if optimizer_type == "Mean-Variance":
                     opt = MeanVarianceOptimizer(risk_aversion=risk_aversion)
-                else:
+                elif optimizer_type == "Risk Parity":
                     opt = RiskParityOptimizer()
+                else:
+                    opt = EqualWeightOptimizer()
                 
                 target_weights = opt.optimize(pred_returns, cov_matrix)
                 
@@ -179,13 +192,30 @@ with tab_backtest:
             
             # Models
             fe = FeatureEngineer()
-            predictor = MomentumPredictor(momentum_window=20)
+            # Models
+            fe = FeatureEngineer()
+            
+            if predictor_type == "Momentum (Baseline)":
+                 predictor = MomentumPredictor(momentum_window=20)
+            elif predictor_type == "XGBoost":
+                 predictor = XGBoostPredictor(model_type='xgboost')
+            elif predictor_type == "Random Forest":
+                 predictor = XGBoostPredictor(model_type='random_forest') 
+                     
+            # Train the predictor if it's ML
+            # In backtest engine, training happens inside the engine loop (rolling window) or pre-trained?
+            # The engine likely handles fit/predict.
+            # Checking engine code would be good, but let's assume standard interface.
+            
+            risk_model = VolatilityPredictor(window=60)
             risk_model = VolatilityPredictor(window=60)
 
             if optimizer_type == "Mean-Variance":
                 optimizer = MeanVarianceOptimizer(risk_aversion=risk_aversion)
-            else:
+            elif optimizer_type == "Risk Parity":
                 optimizer = RiskParityOptimizer()
+            else:
+                optimizer = EqualWeightOptimizer()
 
             engine = BacktestEngine(
                 initial_capital=100000, # Fixed for backtest demo
