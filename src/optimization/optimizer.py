@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 import pandas as pd
 import numpy as np
-import cvxpy as cp
 import logging
 from typing import Optional, Dict, Any, List, Union
 from .utils import make_psd, clean_weights
