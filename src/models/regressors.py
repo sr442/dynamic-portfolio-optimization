@@ -1,10 +1,7 @@
 from .base import BasePredictor
 import pandas as pd
 import numpy as np
-try:
-    from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
-except ImportError:
-    pass
+# from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV # Removed to save size
 import logging
 from typing import Optional, Dict, Any
 
@@ -18,13 +15,14 @@ except ImportError:
 import logging
 from typing import Optional, Dict, Any
 
-# Using Scikit-Learn GradientBoostingRegressor as a lightweight alternative to XGBoost
-# to reduce deployment slug size (XGBoost binary is ~100MB).
+# Using lightweight custom Mini-ML implementations to avoid scikit-learn dependency (~60MB+).
 try:
-    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-    HAS_SKLEARN = True
+    from .mini_ml import RandomForestRegressor, GradientBoostingRegressor
+    HAS_MINI_ML = True
 except ImportError:
-    HAS_SKLEARN = False
+    HAS_MINI_ML = False
+    
+HAS_SKLEARN = False # Force false to use Mini-ML
 
 class XGBoostPredictor(BasePredictor):
     """
@@ -36,8 +34,8 @@ class XGBoostPredictor(BasePredictor):
         self.target_name = target_name
         self.logger = logging.getLogger(__name__)
         
-        if not HAS_SKLEARN:
-            self.logger.error("Scikit-Learn not available. Predictor disabled.")
+        if not HAS_MINI_ML:
+            self.logger.error("Mini-ML module not available. Predictor disabled.")
             self.model = None
             self.model_type = 'disabled'
             return
@@ -84,42 +82,8 @@ class XGBoostPredictor(BasePredictor):
     def tune(self, X: pd.DataFrame, y: pd.Series, n_iter: int = 10):
         """
         Perform hyperparameter tuning.
+        DISABLED to reduce dependencies.
         """
-        if self.model is None:
-            return
-
-        if isinstance(self.model, GradientBoostingRegressor):
-            param_dist = {
-                'n_estimators': [50, 100, 200],
-                'max_depth': [3, 5, 7],
-                'learning_rate': [0.01, 0.05, 0.1, 0.2],
-                'subsample': [0.6, 0.8, 1.0],
-                'max_features': ['sqrt', 'log2', None]
-            }
-            estimator = GradientBoostingRegressor(random_state=42)
-        else:
-            # Random Forest tuning space
-            param_dist = {
-                'n_estimators': [50, 100, 200],
-                'max_depth': [3, 5, 10, None],
-                'min_samples_split': [2, 5, 10]
-            }
-            estimator = RandomForestRegressor(random_state=42)
-
-        tscv = TimeSeriesSplit(n_splits=5)
-        
-        search = RandomizedSearchCV(
-            estimator=estimator,
-            param_distributions=param_dist,
-            n_iter=n_iter,
-            scoring='neg_mean_squared_error',
-            cv=tscv,
-            verbose=1,
-            n_jobs=-1
-        )
-        
-        search.fit(X, y)
-        self.hyperparams.update(search.best_params_)
-        self.model = search.best_estimator_
-        self.logger.info(f"Tuning complete. Best params: {search.best_params_}")
+        self.logger.warning("Hyperparameter tuning is disabled in this lightweight version.")
+        pass
 
