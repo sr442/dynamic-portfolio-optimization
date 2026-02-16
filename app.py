@@ -120,8 +120,42 @@ with tab_live:
                      predictor = XGBoostPredictor(hyperparams={'n_estimators': 100, 'max_depth': 5}, model_type='random_forest')
                 risk_model = VolatilityPredictor(window=60)
                 
-                # Predict Returns (Next Period)
-                pred_returns = predictor.predict(X_now)
+                # Train Predictor if ML
+                if isinstance(predictor, XGBoostPredictor):
+                     with st.spinner(f"Training {predictor.model_type} model..."):
+                         try:
+                             # Prepare Training Data (Global Model)
+                             # Stack features: Index=(Date, Ticker), Cols=Feature
+                             stack = features.stack(level='Ticker').sort_index(level=0)
+                             
+                             # Target: Next day return
+                             returns_df = features.xs('log_ret', level='Feature', axis=1)
+                             future_returns = returns_df.shift(-1)
+                             y_stack = future_returns.stack().reindex(stack.index)
+                             
+                             # Drop NaNs
+                             valid = ~y_stack.isna()
+                             X_train = stack[valid]
+                             X_train = X_train.sort_index(axis=1)
+                             y_train = y_stack[valid]
+                             
+                             if len(X_train) > 30:
+                                 predictor.fit(X_train, y_train)
+                                 # Predict with sorted cols
+                                 X_pred = X_now.sort_index(axis=1)
+                                 pred_returns = predictor.predict(X_pred)
+                             else:
+                                 st.warning(f"Insufficient data for training ({len(X_train)} samples). Using neutral prediction.")
+                                 pred_returns = pd.Series(0, index=X_now.index)
+                                 
+                         except Exception as e:
+                             st.error(f"Training failed: {e}")
+                             pred_returns = pd.Series(0, index=X_now.index)
+                else:
+                    # Predict Returns (Next Period)
+                    # For non-ML (Momentum), order doesn't matter as much, 
+                    # but good practice to be consistent if needed.
+                    pred_returns = predictor.predict(X_now)
                 
                 # Predict Covariance (Historical lookback)
                 # Slice last 60 days of returns

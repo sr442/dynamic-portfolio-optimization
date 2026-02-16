@@ -113,7 +113,34 @@ def optimize_portfolio(req: OptRequest):
         else:
             predictor = MomentumPredictor(momentum_window=20) # Default
         
-        pred_returns = predictor.predict(X_now)
+        if isinstance(predictor, XGBoostPredictor):
+            # Train logic
+            try:
+                 stack = features.stack(level='Ticker').sort_index(level=0)
+                 returns_df = features.xs('log_ret', level='Feature', axis=1)
+                 future_returns = returns_df.shift(-1)
+                 y_stack = future_returns.stack().reindex(stack.index)
+                 valid = ~y_stack.isna()
+                 X_train = stack[valid]
+                 X_train = X_train.sort_index(axis=1)
+                 y_train = y_stack[valid]
+                 
+                 if len(X_train) > 30:
+                     predictor.fit(X_train, y_train)
+                     X_pred = X_now.sort_index(axis=1)
+                     pred_returns = predictor.predict(X_pred)
+                 else:
+                     logger.warning(f"Insufficient data for training ({len(X_train)} samples).")
+                     pred_returns = pd.Series(0, index=X_now.index)
+                     
+            except Exception as e:
+                 logger.error(f"Training failed: {e}")
+                 pred_returns = pd.Series(0, index=X_now.index)
+        else:
+            # Momentum / Baseline (Features might not match trained model, but baseline doesn't care usually)
+            # But let's be safe if Momentum uses specific feature.
+            # MomentumPredictor uses 'log_ret'. unstack gives it. It doesn't rely on order.
+            pred_returns = predictor.predict(X_now)
         
         # Covariance
         hist_features = features.iloc[-60:]

@@ -93,8 +93,51 @@ class BacktestEngine:
             X_t = state_t.unstack(level='Feature')
             
             # Predict Returns
+            # Predict Returns
             if self.predictor_model:
-                pred_returns = self.predictor_model.predict(X_t)
+                # --- ML Training (Walk-Forward) ---
+                if hasattr(self.predictor_model, 'model_type') and self.predictor_model.model_type in ['xgboost', 'random_forest']:
+                    # Train on moving window of last ~2 years (504 trading days)
+                    window_size = 504
+                    
+                    # Prepare Training Data
+                    features_slice = features.loc[:t].tail(window_size)
+                        
+                    # Helper to prepare X,y from features
+                    try:
+                        # Stack: Index=(Date, Ticker), Cols=Feature
+                        stack = features_slice.stack(level='Ticker')
+                        stack = stack.sort_index(level=0)
+                        
+                        # Create Target: shifted log_ret per ticker
+                        returns_df = features_slice.xs('log_ret', level='Feature', axis=1)
+                        future_returns = returns_df.shift(-1) # Row t has return t+1
+                        
+                        # Stack again
+                        y_stack = future_returns.stack().reindex(stack.index)
+                        
+                        # Combine
+                        valid_mask = ~y_stack.isna()
+                        X_train = stack[valid_mask]
+                        X_train = X_train.sort_index(axis=1)
+                        y_train = y_stack[valid_mask]
+                        
+                        if len(X_train) > 30: # Min samples to train
+                            self.predictor_model.fit(X_train, y_train)
+                            
+                            # Ensure prediction input is also sorted
+                            X_pred = X_t.sort_index(axis=1)
+                            pred_returns = self.predictor_model.predict(X_pred)
+                        else:
+                            self.logger.warning(f"Insufficient data for training ({len(X_train)} samples). Skipping prediction.")
+                            pred_returns = pd.Series(0, index=X_t.index)
+                            
+                    except Exception as e:
+                       self.logger.warning(f"Training failed at {t}: {e}")
+                       pred_returns = pd.Series(0, index=X_t.index)
+                else:
+                    # Baseline / Already Trained Models (e.g. Momentum)
+                    pred_returns = self.predictor_model.predict(X_t)
             else:
                 pred_returns = pd.Series(0, index=X_t.index)
             

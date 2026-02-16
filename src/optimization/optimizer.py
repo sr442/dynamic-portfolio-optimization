@@ -109,6 +109,6 @@ class EqualWeightOptimizer(BaseOptimizer):
     def __init__(self):
         super().__init__(name="EqualWeight")
 
-    def optimize(self, expected_returns: pd.Series, covariance_matrix: pd.DataFrame, **kwargs) -> pd.Series:
+    def optimize(self, expected_returns: pd.Series, covariance_matrix: pd.DataFrame, current_weights: Optional[pd.Series] = None, **kwargs) -> pd.Series:
         n = len(expected_returns)
         return pd.Series(1/n, index=expected_returns.index)
